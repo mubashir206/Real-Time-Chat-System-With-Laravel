@@ -82,6 +82,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let currentChannel = null;
     let typingTimeout = null;
     let isTyping = false;
+    let pendingMessages = new Map(); // Track pending messages by their temp ID
 
     // Initialize Pusher
     const pusher = new Pusher('864e679bfe2ca3ff2476', {
@@ -226,8 +227,6 @@ document.addEventListener('DOMContentLoaded', function() {
     // Show typing indicator
     function showTypingIndicator(userName) {
         const chatBody = document.getElementById('chat-body');
-
-        // Remove existing typing indicator
         const existingIndicator = chatBody.querySelector('.typing-indicator');
         if (existingIndicator) {
             existingIndicator.remove();
@@ -247,7 +246,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 </div>
             </div>
         `;
-
         chatBody.appendChild(typingDiv);
         chatBody.scrollTop = chatBody.scrollHeight;
     }
@@ -275,11 +273,9 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(data => {
             if (data.success && data.updated_count > 0) {
                 console.log(`Marked ${data.updated_count} messages as seen`);
-                // Only refresh UI if messages were actually updated
                 refreshMessagesReadStatus(conversationId);
             } else {
                 console.log('No new messages to mark as seen');
-                // Still refresh UI to ensure correct tick display for previously seen messages
                 refreshMessagesReadStatus(conversationId);
             }
         })
@@ -288,7 +284,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Update message read receipts in UI - Updated to handle all sent messages
+    // Update message read receipts in UI
     function updateMessageReadReceipts() {
         const chatBody = document.getElementById('chat-body');
         const sentMessages = chatBody.querySelectorAll('.message-bubble.sent');
@@ -296,7 +292,6 @@ document.addEventListener('DOMContentLoaded', function() {
         sentMessages.forEach(messageEl => {
             const tickIcon = messageEl.querySelector('small i');
             if (tickIcon && tickIcon.classList.contains('fa-check') && !tickIcon.classList.contains('fa-check-double')) {
-                // Change single tick to double tick
                 tickIcon.classList.remove('fa-check');
                 tickIcon.classList.add('fa-check-double');
                 console.log('Updated message to double tick (seen)');
@@ -304,7 +299,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Refresh messages to get updated read status - FIXED FUNCTION
+    // Refresh messages to get updated read status
     function refreshMessagesReadStatus(conversationId) {
         fetch(`/conversations/${conversationId}/messages`, {
             headers: { 'Accept': 'application/json' }
@@ -357,7 +352,9 @@ document.addEventListener('DOMContentLoaded', function() {
         const chatBody = document.getElementById('chat-body');
         chatBody.innerHTML = '<p class="text-center">Loading messages...</p>';
 
-        // Unsubscribe from previous channel before subscribing to new one
+        // Clear pending messages when switching conversations
+        pendingMessages.clear();
+
         unsubscribeFromCurrentChannel();
 
         fetch(`/conversations/${conversationId}/messages`, {
@@ -374,8 +371,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 chatBody.innerHTML = '<p class="text-muted text-center">No messages yet. Start the conversation!</p>';
             }
             chatBody.scrollTop = chatBody.scrollHeight;
-
-            // Mark messages as seen when loading conversation
             markMessagesAsSeen(conversationId);
         })
         .catch(error => {
@@ -383,24 +378,48 @@ document.addEventListener('DOMContentLoaded', function() {
             chatBody.innerHTML = '<p class="text-danger text-center">Error loading messages</p>';
         });
 
-        // Subscribe to Pusher channel for this conversation
         const channelName = 'conversation.' + conversationId;
         currentChannel = pusher.subscribe(channelName);
         console.log('Subscribed to channel:', channelName);
 
         // Listen for messages
         currentChannel.bind('message.sent', function(data) {
-            console.log("New message received:", data);
+            console.log("New message received via Pusher:", data);
 
             if (data.conversation_id == conversationId) {
-                console.log("Adding message to chat:", data);
                 hideTypingIndicator();
-                addMessageToChat(data);
+
+                // Check if this is our own message that we sent (check pending messages)
+                let tempMessageFound = false;
+                for (let [tempId, messageInfo] of pendingMessages) {
+                    if (messageInfo.content === data.message && data.user_id === authUserId) {
+                        // This is our message - replace the temp message
+                        const tempMessageElement = document.querySelector(`[data-message-id="${tempId}"]`);
+                        if (tempMessageElement) {
+                            // Update the temp message to become the real message
+                            tempMessageElement.setAttribute('data-message-id', data.id);
+                            const timeEl = tempMessageElement.querySelector('small');
+                            timeEl.innerHTML = `${new Date(data.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} <i class="fas fa-check ms-1"></i>`;
+                            console.log(`Replaced temp message ${tempId} with real message ${data.id}`);
+
+                            // Remove from pending messages
+                            pendingMessages.delete(tempId);
+                            tempMessageFound = true;
+                            break;
+                        }
+                    }
+                }
+
+                // If no temp message found, this is a message from another user
+                if (!tempMessageFound && data.user_id !== authUserId) {
+                    addMessageToChat(data);
+                    console.log("Added new message from other user:", data.id);
+                }
 
                 const chatBody = document.getElementById('chat-body');
                 chatBody.scrollTop = chatBody.scrollHeight;
 
-                // Mark new received message as seen
+                // Mark messages as seen after a short delay
                 setTimeout(() => {
                     markMessagesAsSeen(conversationId);
                 }, 500);
@@ -412,7 +431,6 @@ document.addEventListener('DOMContentLoaded', function() {
         // Listen for typing events
         currentChannel.bind('user.typing', function(data) {
             console.log("Typing event received:", data);
-
             if (data.conversation_id == conversationId && data.user_id !== authUserId) {
                 if (data.is_typing) {
                     showTypingIndicator(data.user_name);
@@ -422,31 +440,24 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
 
-        // Listen for messages seen events - ENHANCED WITH IMMEDIATE REFRESH
+        // Listen for message seen events
         currentChannel.bind('messages.seen', function(data) {
             console.log("Messages seen event received:", data);
-
             if (data.conversation_id == conversationId && data.seen_by_user_id !== authUserId) {
-                // Immediately refresh read status from server to get accurate data
                 refreshMessagesReadStatus(conversationId);
-
                 console.log("Refreshed read receipts due to messages.seen event");
             }
         });
 
-        // CRITICAL: Always refresh read status when opening conversation
-        // This handles all cases where messages were marked as seen while chat was closed
         setTimeout(() => {
             refreshMessagesReadStatus(conversationId);
             console.log("Initial read status refresh on conversation load");
         }, 1000);
     }
 
-    // Add message to chat - UPDATED TO INCLUDE MESSAGE ID
+    // Add message to chat
     function addMessageToChat(message) {
         const chatBody = document.getElementById('chat-body');
-
-        // Remove "No messages yet" placeholder if it exists
         const placeholder = chatBody.querySelector('.text-muted.text-center');
         if (placeholder) {
             chatBody.innerHTML = '';
@@ -454,9 +465,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const messageDiv = document.createElement('div');
         const isSent = message.user_id === authUserId;
-
         messageDiv.className = `d-flex ${isSent ? 'justify-content-end' : 'justify-content-start'} mb-2`;
-        messageDiv.setAttribute('data-message-id', message.id); // Add message ID as data attribute
+        messageDiv.setAttribute('data-message-id', message.id);
         messageDiv.innerHTML = `
             <div class="message-bubble ${isSent ? 'sent' : 'received'}">
                 <p class="mb-1">${message.message}</p>
@@ -466,7 +476,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 </small>
             </div>
         `;
-
         chatBody.appendChild(messageDiv);
         console.log('Message added to chat UI with ID:', message.id);
     }
@@ -474,7 +483,6 @@ document.addEventListener('DOMContentLoaded', function() {
     // Create conversation
     document.getElementById('create-conversation-btn').addEventListener('click', function() {
         const otherUserId = document.getElementById('other-user-id').value;
-
         if (!otherUserId) {
             alert('Please select a user');
             return;
@@ -506,7 +514,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 body: JSON.stringify({ other_user_id: parseInt(otherUserId) })
             })
             .then(response => {
-                console.log('Raw response:', response);
                 if (!response.ok) {
                     throw new Error(`HTTP error! Status: ${response.status}, Status Text: ${response.statusText}`);
                 }
@@ -514,11 +521,9 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .then(data => {
                 console.log('Parsed conversation response:', data);
-
                 if (data && data.success && data.data && data.data.id) {
                     const modal = bootstrap.Modal.getInstance(document.getElementById('newConversationModal'));
                     modal.hide();
-
                     loadConversations();
                     loadMessages(data.data.id, selectedUser.name);
                 } else {
@@ -553,12 +558,13 @@ document.addEventListener('DOMContentLoaded', function() {
         }, 1000);
     });
 
-    // Send message
+    // Send message with optimistic UI (FIXED)
     document.getElementById('send-message-form').addEventListener('submit', function(e) {
         e.preventDefault();
 
         const conversationId = document.getElementById('conversation-id').value;
         const messageInput = document.getElementById('message-input');
+        const sendButton = this.querySelector('button[type="submit"]');
         const message = messageInput.value.trim();
 
         if (!conversationId) {
@@ -569,14 +575,41 @@ document.addEventListener('DOMContentLoaded', function() {
             alert('Please enter a message');
             return;
         }
+        if (sendButton.disabled) return;
 
+        // Disable form to prevent multiple submissions
+        messageInput.disabled = true;
+        sendButton.disabled = true;
+
+        // Stop typing indicator
         sendTypingStop(conversationId);
-
         if (typingTimeout) {
             clearTimeout(typingTimeout);
             typingTimeout = null;
         }
 
+        // Create unique temp ID and store message info
+        const tempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+        pendingMessages.set(tempId, {
+            content: message,
+            timestamp: Date.now()
+        });
+
+        // Optimistic add with temp ID
+        const tempMessage = {
+            id: tempId,
+            user_id: authUserId,
+            message: message,
+            created_at: new Date().toISOString(),
+            is_seen: false
+        };
+        addMessageToChat(tempMessage);
+
+        const chatBody = document.getElementById('chat-body');
+        chatBody.scrollTop = chatBody.scrollHeight;
+        messageInput.value = '';
+
+        // Send message to server
         fetch('/conversations/messages/send', {
             method: 'POST',
             headers: {
@@ -596,36 +629,62 @@ document.addEventListener('DOMContentLoaded', function() {
             return response.json();
         })
         .then(data => {
-            console.log('Send message response:', data);
-
-            if (data.success && data.data) {
-                messageInput.value = '';
-            } else {
-                alert('Failed to send message: ' + (data.message || 'Unknown error'));
+            console.log('Message sent successfully:', data);
+            if (!data.success) {
+                throw new Error(data.message || 'Failed to send message');
             }
+            // The Pusher event will handle replacing the temp message
         })
         .catch(error => {
             console.error('Error sending message:', error);
-            alert('Failed to send message. Check console for details.');
+            // Remove temp message on error
+            const messageEl = chatBody.querySelector(`[data-message-id="${tempId}"]`);
+            if (messageEl) {
+                messageEl.remove();
+                console.log('Removed temp message due to error:', tempId);
+            }
+            pendingMessages.delete(tempId);
+            alert('Failed to send message. Please try again.');
+        })
+        .finally(() => {
+            // Re-enable form
+            messageInput.disabled = false;
+            sendButton.disabled = false;
+            messageInput.focus();
         });
     });
+
+    // Clean up old pending messages (in case of network issues)
+    setInterval(function() {
+        const now = Date.now();
+        for (let [tempId, messageInfo] of pendingMessages) {
+            // Remove pending messages older than 30 seconds
+            if (now - messageInfo.timestamp > 30000) {
+                const messageEl = document.getElementById('chat-body').querySelector(`[data-message-id="${tempId}"]`);
+                if (messageEl) {
+                    messageEl.remove();
+                    console.log('Cleaned up old temp message:', tempId);
+                }
+                pendingMessages.delete(tempId);
+            }
+        }
+    }, 5000);
 
     // Load users when modal opens
     document.getElementById('newConversationModal').addEventListener('shown.bs.modal', loadUsers);
 
-    // Handle window focus to mark messages as seen - UPDATED
+    // Handle window focus to mark messages as seen
     window.addEventListener('focus', function() {
         const conversationId = document.getElementById('conversation-id').value;
         if (conversationId) {
             markMessagesAsSeen(conversationId);
-            // Also refresh read status for sender
             setTimeout(() => {
                 refreshMessagesReadStatus(conversationId);
             }, 500);
         }
     });
 
-    // Handle chat body click to mark messages as seen - UPDATED
+    // Handle chat body click to mark messages as seen
     document.addEventListener('click', function(e) {
         if (e.target.closest('#chat-body')) {
             const conversationId = document.getElementById('conversation-id').value;

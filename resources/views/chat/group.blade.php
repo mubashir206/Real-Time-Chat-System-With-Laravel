@@ -162,12 +162,14 @@
 document.addEventListener('DOMContentLoaded', () => {
     const csrfToken = '{{ csrf_token() }}';
     const authUserId = {{ Auth::id() }};
+    const authUserName = '{{ Auth::user()->name }}';
     let currentGroupId = null;
     let isAdmin = false;
     let groupType = 'public';
     let currentChannel = null;
     let typingTimeout = null;
     let isTyping = false;
+    let pendingMessages = new Map(); // Track pending messages by their temp ID
 
     // Initialize Pusher
     const pusher = new Pusher('864e679bfe2ca3ff2476', {
@@ -456,7 +458,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const modal = bootstrap.Modal.getInstance(document.getElementById('newGroupModal'));
                 modal.hide();
                 loadGroups();
-                loadGroupMessages(data.data.id, data.data.name, '{{ Auth::user()->name }}');
+                loadGroupMessages(data.data.id, data.data.name, authUserName);
             } else {
                 alert('Failed to create group: ' + (data.message || 'Unknown error'));
             }
@@ -555,6 +557,14 @@ document.addEventListener('DOMContentLoaded', () => {
         updateUIBasedOnPermissions();
         document.getElementById('select-chat-prompt').style.display = 'none';
 
+        const chatBody = document.getElementById('chat-body');
+        chatBody.innerHTML = '<p class="text-center">Loading messages...</p>';
+
+        // Clear pending messages when switching groups
+        pendingMessages.clear();
+
+        unsubscribeFromCurrentChannel();
+
         fetch(`/groups/${groupId}/messages`, {
             headers: { 'Accept': 'application/json' }
         })
@@ -564,32 +574,65 @@ document.addEventListener('DOMContentLoaded', () => {
         })
         .then(data => {
             console.log('Messages response:', data);
-            const body = document.getElementById('chat-body');
-            body.innerHTML = '';
+            chatBody.innerHTML = '';
             if (data.success && data.data && data.data.length > 0) {
                 data.data.forEach(msg => {
                     addMessageToChat(msg);
                 });
             } else {
-                body.innerHTML = '<p class="text-muted text-center">No messages yet. Start the conversation!</p>';
+                chatBody.innerHTML = '<p class="text-muted text-center">No messages yet. Start the conversation!</p>';
             }
-            body.scrollTop = body.scrollHeight;
-            unsubscribeFromCurrentChannel();
+            chatBody.scrollTop = chatBody.scrollHeight;
+
             const channelName = 'group.' + groupId;
             currentChannel = pusher.subscribe(channelName);
             console.log('Subscribed to channel:', channelName);
 
+            // Listen for messages
             currentChannel.bind('message.sent', function(data) {
-                console.log("New message received:", data);
+                console.log("New message received via Pusher:", data);
                 if (data.group_id == groupId) {
                     hideTypingIndicator();
-                    addMessageToChat(data);
-                    const chatBody = document.getElementById('chat-body');
+
+                    // Check if this is our own message that we sent (check pending messages)
+                    let tempMessageFound = false;
+                    for (let [tempId, messageInfo] of pendingMessages) {
+                        if (messageInfo.content === data.message && data.user_id === authUserId) {
+                            // This is our message - replace the temp message
+                            const tempMessageElement = document.querySelector(`[data-message-id="${tempId}"]`);
+                            if (tempMessageElement) {
+                                // Update the temp message to become the real message
+                                tempMessageElement.setAttribute('data-message-id', data.id);
+                                const timeEl = tempMessageElement.querySelector('small');
+                                timeEl.innerHTML = `${new Date(data.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} <i class="fas fa-check ms-1"></i>`;
+                                console.log(`Replaced temp message ${tempId} with real message ${data.id}`);
+
+                                // Remove from pending messages
+                                pendingMessages.delete(tempId);
+                                tempMessageFound = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    // If no temp message found, this is a message from another user
+                    if (!tempMessageFound && data.user_id !== authUserId) {
+                        addMessageToChat(data);
+                        console.log("Added new message from other user:", data.id);
+                    }
+
                     chatBody.scrollTop = chatBody.scrollHeight;
+
+                    // Mark messages as seen after a short delay
+                    setTimeout(() => {
+                        markMessagesAsSeen(groupId);
+                    }, 500);
+
                     loadGroups();
                 }
             });
 
+            // Listen for typing events
             currentChannel.bind('user.typing', function(data) {
                 console.log("Typing event received:", data);
                 if (data.group_id == groupId && data.user_id !== authUserId) {
@@ -601,6 +644,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
 
+            // Listen for message seen events
             currentChannel.bind('messages.seen', function(data) {
                 console.log("Messages seen event received:", data);
                 if (data.group_id == groupId && data.user_id !== authUserId) {
@@ -608,7 +652,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
 
-            // CRITICAL: Listen for group privacy changes
+            // Listen for group privacy changes
             currentChannel.bind('group.privacy.changed', function(data) {
                 console.log("Group privacy changed event received:", data);
                 if (data.group_id == groupId) {
@@ -624,7 +668,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         : 'Group is now public. Everyone can send messages.';
 
                     // Add system message to chat
-                    const chatBody = document.getElementById('chat-body');
                     const systemMsg = document.createElement('div');
                     systemMsg.className = 'd-flex justify-content-center mb-2';
                     systemMsg.innerHTML = `
@@ -661,24 +704,33 @@ document.addEventListener('DOMContentLoaded', () => {
         const isSent = msg.user_id === authUserId;
         const div = document.createElement('div');
         div.className = `d-flex ${isSent ? 'justify-content-end' : 'justify-content-start'} mb-2`;
+        div.setAttribute('data-message-id', msg.id);
+
+        // Handle user name display - for temp messages, use current user name
+        const userName = msg.user ? msg.user.name : (isSent ? authUserName : 'Unknown User');
+
         div.innerHTML = `
             <div class="message-bubble ${isSent ? 'sent' : 'received'}">
-                <p class="mb-0"><strong>${msg.user.name}</strong>: ${msg.message}</p>
+                <p class="mb-0"><strong>${userName}</strong>: ${msg.message}</p>
                 <small class="text-muted d-block">
                     ${new Date(msg.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                    ${isSent ? '<i class="fas ' + (msg.is_seen ? 'fa-check-double text-primary' : 'fa-check text-muted') + '"></i>' : ''}
+                    ${isSent ? '<i class="fas ' + (msg.is_seen ? 'fa-check-double text-primary' : 'fa-check text-muted') + ' ms-1"></i>' : ''}
                 </small>
             </div>
         `;
         chatBody.appendChild(div);
-        console.log('Message added to chat UI');
+        console.log('Message added to chat UI with ID:', msg.id);
     }
 
-    // Send message in group
+    // Send message in group with optimistic UI (NEW)
     document.getElementById('send-message-form').addEventListener('submit', (e) => {
         e.preventDefault();
+
         const groupId = document.getElementById('group-id').value;
-        const message = document.getElementById('message-input').value.trim();
+        const messageInput = document.getElementById('message-input');
+        const sendButton = e.target.querySelector('button[type="submit"]');
+        const message = messageInput.value.trim();
+
         if (!groupId) {
             alert('Please select a group');
             return;
@@ -687,11 +739,42 @@ document.addEventListener('DOMContentLoaded', () => {
             alert('Please enter a message');
             return;
         }
+        if (sendButton.disabled) return;
+
+        // Disable form to prevent multiple submissions
+        messageInput.disabled = true;
+        sendButton.disabled = true;
+
+        // Stop typing indicator
         sendTypingStop(groupId);
         if (typingTimeout) {
             clearTimeout(typingTimeout);
             typingTimeout = null;
         }
+
+        // Create unique temp ID and store message info
+        const tempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+        pendingMessages.set(tempId, {
+            content: message,
+            timestamp: Date.now()
+        });
+
+        // Optimistic add with temp ID
+        const tempMessage = {
+            id: tempId,
+            user_id: authUserId,
+            message: message,
+            created_at: new Date().toISOString(),
+            is_seen: false,
+            user: { name: authUserName } // Add user info for display
+        };
+        addMessageToChat(tempMessage);
+
+        const chatBody = document.getElementById('chat-body');
+        chatBody.scrollTop = chatBody.scrollHeight;
+        messageInput.value = '';
+
+        // Send message to server
         fetch(`/groups/${groupId}/messages`, {
             method: 'POST',
             headers: {
@@ -707,15 +790,27 @@ document.addEventListener('DOMContentLoaded', () => {
         })
         .then(data => {
             console.log('Send message response:', data);
-            if (data.success && data.data) {
-                document.getElementById('message-input').value = '';
-            } else {
-                alert('Failed to send message: ' + (data.message || 'Unknown error'));
+            if (!data.success) {
+                throw new Error(data.message || 'Failed to send message');
             }
+            // The Pusher event will handle replacing the temp message
         })
         .catch(error => {
             console.error('Error sending message:', error);
-            alert('Failed to send message. Check console for details.');
+            // Remove temp message on error
+            const messageEl = chatBody.querySelector(`[data-message-id="${tempId}"]`);
+            if (messageEl) {
+                messageEl.remove();
+                console.log('Removed temp message due to error:', tempId);
+            }
+            pendingMessages.delete(tempId);
+            alert('Failed to send message. Please try again.');
+        })
+        .finally(() => {
+            // Re-enable form
+            messageInput.disabled = false;
+            sendButton.disabled = false;
+            messageInput.focus();
         });
     });
 
@@ -723,14 +818,33 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('message-input').addEventListener('input', function() {
         const groupId = document.getElementById('group-id').value;
         if (!groupId) return;
+
         if (typingTimeout) {
             clearTimeout(typingTimeout);
         }
+
         sendTypingStart(groupId);
+
         typingTimeout = setTimeout(function() {
             sendTypingStop(groupId);
         }, 1000);
     });
+
+    // Clean up old pending messages (in case of network issues)
+    setInterval(function() {
+        const now = Date.now();
+        for (let [tempId, messageInfo] of pendingMessages) {
+            // Remove pending messages older than 30 seconds
+            if (now - messageInfo.timestamp > 30000) {
+                const messageEl = document.getElementById('chat-body').querySelector(`[data-message-id="${tempId}"]`);
+                if (messageEl) {
+                    messageEl.remove();
+                    console.log('Cleaned up old temp message:', tempId);
+                }
+                pendingMessages.delete(tempId);
+            }
+        }
+    }, 5000);
 
     // Load users when add member modal opens
     document.getElementById('addMemberModal').addEventListener('shown.bs.modal', loadUsers);
