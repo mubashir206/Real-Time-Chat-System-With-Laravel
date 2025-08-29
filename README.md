@@ -1,66 +1,190 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+1. Authentication System
+The platform includes a complete authentication system with the following features:
+Signup (User Registration):
+ New users can register with their email, password, and profile information.
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
 
-## About Laravel
+Login:
+ Users can log in securely using email and password.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+Forgot Password:
+ Users can request a password reset link through email.
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
 
-## Learning Laravel
+Reset Password:
+ Users can securely reset their password using the email verification link.
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+Logout:
+ Logged-in users can log out anytime, which clears their active session.
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
 
-## Laravel Sponsors
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+2. User Management
+Admin Features:
 
-### Premium Partners
 
-- **[Vehikl](https://vehikl.com/)**
-- **[Tighten Co.](https://tighten.co)**
-- **[WebReinvent](https://webreinvent.com/)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel/)**
-- **[Cyber-Duck](https://cyber-duck.co.uk)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Jump24](https://jump24.co.uk)**
-- **[Redberry](https://redberry.international/laravel/)**
-- **[Active Logic](https://activelogic.com)**
-- **[byte5](https://byte5.de)**
-- **[OP.GG](https://op.gg)**
+Admin can view a complete list of all users.
 
-## Contributing
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+Admin can add new users.
 
-## Code of Conduct
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+Normal User Features:
 
-## Security Vulnerabilities
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+Users can only see their own listing (their data only).
 
-## License
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+Users can update their own profile information in the Settings tab.
+
+
+
+3. Chat System
+The application provides a real-time chat system using Pusher.
+a) Personal Chat
+Authenticated users can send and receive messages in real-time.
+
+
+Messages include:
+
+
+Seen / Unseen indicators
+
+
+Typing indicator in real-time
+
+
+b) Group Chat
+Group Creation:
+ Any authenticated user can create a group.
+
+
+Group Admin:
+ The group creator becomes the admin.
+
+
+Admin Permissions:
+
+
+Add  members
+
+
+View group members
+
+
+Control group type (private or public)
+
+
+Group Types:
+
+
+Public Group:
+ Any group member can send and receive messages in real-time.
+
+
+Private Group:
+ Only the group admin can send messages. Other members can only view.
+
+
+Real-time Features in Groups:
+
+
+Typing indicator
+
+
+Real-time send and receive messages
+
+
+Seen / Unseen indicators
+
+
+
+4. Pusher Integration
+The system uses Pusher for real-time communication.
+Why Pusher?
+
+
+Simple and reliable real-time messaging
+
+
+Provides typing, seen/unseen, and message delivery events
+
+
+How It Works:
+
+
+When a user sends a message, an event is triggered in Laravel.
+
+
+The event is published to Pusher channels.
+
+
+All connected clients subscribed to that channel instantly receive the new message.
+
+
+Typing indicators and seen/unseen status are also updated instantly.
+
+
+
+5. Access Control & Security
+Only authenticated users can access the chat system.
+
+
+Role-based access control ensures
+
+
+Pusher channels are configured with authentication to prevent unauthorized access.
+
+
+
+6. Key Features Summary
+Secure login, signup, and password reset
+
+
+Role-based user management (Admin vs User)
+
+
+Real-time personal chat with seen/unseen and typing indicators
+
+
+Real-time group chat (public and private)
+
+
+Group admin management (add members, control group type)
+
+
+Pusher-powered reliable real-time communication
+
+
+Authenticated access only
+
+
+
+7. Technology Stack
+Backend: Laravel (PHP Framework)
+
+
+Frontend: Blade Templates
+
+
+Database: MySQL
+
+
+Real-time Messaging: Pusher
+8. Default Admin & User Passwords (Seeder)
+To make the system easy to set up and test, an AdminUserSeeder has been created.
+When you run the seeder, it automatically creates a default Admin account:
+
+
+Email: admin@gmail.com
+
+
+Password: 12345678
+
+
+Whenever an Admin creates a new normal user through the platform, that user’s default password will also be set to:
+
+
+Password: 12345678
