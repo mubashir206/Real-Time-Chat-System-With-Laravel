@@ -683,7 +683,7 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
         if (!message) {
-            alert('Please enter a message');
+            // alert('Please enter a message');
             return;
         }
         if (sendButton.disabled) return;
