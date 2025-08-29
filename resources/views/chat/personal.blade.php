@@ -25,7 +25,13 @@
                     <div id="selected-avatar" class="rounded-circle me-2 d-flex align-items-center justify-content-center"
                          style="width: 40px; height: 40px; background: #3498db; color: #ffffff; font-size: 0.9rem;">
                     </div>
-                    <h4 id="selected-name" class="mb-0"></h4>
+                    <div>
+                        <h4 id="selected-name" class="mb-0"></h4>
+                        <small id="user-status" class="text-muted">
+                            <span id="status-text">Checking status...</span>
+                            <span id="status-dot" class="status-indicator status-offline"></span>
+                        </small>
+                    </div>
                 </div>
                 <div id="chat-body" class="chat-body p-3" style="height: 400px; overflow-y: auto; display: none;">
                     <!-- Messages loaded here -->
@@ -74,6 +80,25 @@
     </div>
 
     <link href="{{ asset('css/personalChat.css') }}" rel="stylesheet">
+
+    <!-- ADD THIS STYLE SECTION for status indicators -->
+    <style>
+    .status-indicator {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-left: 8px;
+        border: 2px solid white;
+    }
+    .status-online {
+        background-color: #28a745;
+    }
+    .status-offline {
+        background-color: #6c757d;
+    }
+    </style>
+
     {{-- <script src="{{ asset('js/personalChat.js') }}"></script> --}}
     <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -83,6 +108,10 @@ document.addEventListener('DOMContentLoaded', function() {
     let typingTimeout = null;
     let isTyping = false;
     let pendingMessages = new Map(); // Track pending messages by their temp ID
+
+    // NEW VARIABLES for online status functionality
+    let currentOtherUserId = null;
+    let userStatusChannel = null;
 
     // Initialize Pusher
     const pusher = new Pusher('864e679bfe2ca3ff2476', {
@@ -147,7 +176,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                     item.onclick = function(e) {
                         e.preventDefault();
-                        loadMessages(conv.id, otherUser.name);
+                        loadMessages(conv.id, otherUser.name, otherUser.id);
                         document.querySelectorAll('.list-group-item').forEach(el => el.classList.remove('active'));
                         item.classList.add('active');
                     };
@@ -183,6 +212,62 @@ document.addEventListener('DOMContentLoaded', function() {
             pusher.unsubscribe(currentChannel.name);
             currentChannel = null;
             console.log('Unsubscribed from previous channel');
+        }
+    }
+
+    // NEW FUNCTION: Subscribe to user status
+    function subscribeToUserStatus(userId) {
+        // Unsubscribe from previous user status channel
+        if (userStatusChannel) {
+            pusher.unsubscribe(userStatusChannel.name);
+            userStatusChannel = null;
+        }
+
+        // Subscribe to the new user's status channel
+        const channelName = 'user.status.' + userId;
+        userStatusChannel = pusher.subscribe(channelName);
+        console.log('Subscribed to user status channel:', channelName);
+
+        // Listen for status changes
+        userStatusChannel.bind('user.status.changed', function(data) {
+            console.log('User status changed:', data);
+            if (data.user_id == userId) {
+                updateUserStatusDisplay(data.status);
+            }
+        });
+    }
+
+    // NEW FUNCTION: Fetch user status
+    function fetchUserStatus(userId) {
+        fetch(`/user/status/${userId}`, {
+            headers: { 'Accept': 'application/json' }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                updateUserStatusDisplay(data.data.status);
+                console.log('Fetched user status:', data.data.status);
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching user status:', error);
+            updateUserStatusDisplay('offline');
+        });
+    }
+
+    // NEW FUNCTION: Update status display
+    function updateUserStatusDisplay(status) {
+        const statusText = document.getElementById('status-text');
+        const statusDot = document.getElementById('status-dot');
+
+        if (statusText && statusDot) {
+            if (status === 'online') {
+                statusText.textContent = 'Online';
+                statusDot.className = 'status-indicator status-online';
+            } else {
+                statusText.textContent = 'Offline';
+                statusDot.className = 'status-indicator status-offline';
+            }
         }
     }
 
@@ -338,8 +423,8 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Load messages
-    function loadMessages(conversationId, userName) {
+    // UPDATED Load messages function (with online status functionality)
+    function loadMessages(conversationId, userName, otherUserId = null) {
         document.getElementById('conversation-id').value = conversationId;
         document.getElementById('selected-name').textContent = userName;
         document.getElementById('selected-avatar').textContent = userName.charAt(0).toUpperCase();
@@ -372,6 +457,32 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             chatBody.scrollTop = chatBody.scrollHeight;
             markMessagesAsSeen(conversationId);
+
+            // NEW: Setup online status tracking
+            if (otherUserId) {
+                currentOtherUserId = otherUserId;
+                subscribeToUserStatus(currentOtherUserId);
+                fetchUserStatus(currentOtherUserId);
+            } else {
+                // Fallback: Get other user ID from conversations if not provided
+                fetch('/conversations', {
+                    headers: { 'Accept': 'application/json' }
+                })
+                .then(response => response.json())
+                .then(convData => {
+                    if (convData.success && Array.isArray(convData.data)) {
+                        const currentConv = convData.data.find(conv => conv.id === parseInt(conversationId));
+                        if (currentConv) {
+                            currentOtherUserId = currentConv.user_one_id === authUserId ? currentConv.user_two_id : currentConv.user_one_id;
+                            subscribeToUserStatus(currentOtherUserId);
+                            fetchUserStatus(currentOtherUserId);
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Error getting conversation data for status:', error);
+                });
+            }
         })
         .catch(error => {
             console.error('Error loading messages:', error);
@@ -525,7 +636,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     const modal = bootstrap.Modal.getInstance(document.getElementById('newConversationModal'));
                     modal.hide();
                     loadConversations();
-                    loadMessages(data.data.id, selectedUser.name);
+                    loadMessages(data.data.id, selectedUser.name, selectedUser.id);
                 } else {
                     console.error('Conversation creation failed:', {
                         success: data.success,
@@ -697,13 +808,18 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Clean up on page unload
+    // UPDATED Clean up on page unload (with status channel cleanup)
     window.addEventListener('beforeunload', function() {
         const conversationId = document.getElementById('conversation-id').value;
         if (conversationId) {
             sendTypingStop(conversationId);
         }
         unsubscribeFromCurrentChannel();
+        // NEW: Cleanup user status channel
+        if (userStatusChannel) {
+            pusher.unsubscribe(userStatusChannel.name);
+            userStatusChannel = null;
+        }
     });
 
     // Initial load

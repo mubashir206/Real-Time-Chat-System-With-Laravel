@@ -34,6 +34,8 @@ Route::middleware('auth')->group(function () {
     Route::get('/users', [UserController::class, 'index'])->name('users.index');
     Route::post('/users/add', [UserController::class, 'add'])->name('users.add');
     Route::get('/show-user', [UserController::class, 'showUser'])->name('users.show.user');
+    Route::get('/user/status/{userId}', [UserController::class, 'getUserStatus'])->name('user.status');
+
     Route::get('/personal-chat', [ChatController::class, 'personalChat'])->name('personal.chat');
     Route::get('/group-chat', [ChatController::class, 'groupChat'])->name('group.chat');
     // Conversations
