@@ -34,18 +34,8 @@ class UserController extends Controller
         return $this->userService->add($request);
     }
 
-    public function getUserStatus(Request $request, $userId)
+    public function getUserStatus($userId)
     {
-        $user = User::find($userId);
-        if (!$user) {
-            return response()->json(['success' => false, 'message' => 'User not found'], 404);
-        }
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'user_id' => $user->id,
-                'status' => $user->is_online ? 'online' : 'offline',
-            ],
-        ]);
+        return $this->userService->getUserStatus($userId);
     }
 }

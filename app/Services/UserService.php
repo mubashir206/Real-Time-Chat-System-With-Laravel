@@ -45,4 +45,19 @@ class UserService
             ], 500);
         }
     }
+
+    public function getUserStatus($userId)
+    {
+        $user = User::find($userId);
+        if (!$user) {
+            return response()->json(['success' => false, 'message' => 'User not found'], 404);
+        }
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'user_id' => $user->id,
+                'status' => $user->is_online ? 'online' : 'offline',
+            ],
+        ]);
+    }
 }
